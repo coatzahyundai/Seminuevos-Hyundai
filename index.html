@@ -272,7 +272,6 @@
             }
         }
 
-        // Permite presionar Enter en el input de contraseña
         document.getElementById('app-password').addEventListener('keypress', function (e) {
             if (e.key === 'Enter') checkPassword();
         });
@@ -316,30 +315,28 @@
         }
 
         function saveToCloud(payload) {
-    const subtitle = document.getElementById('main-subtitle');
-    subtitle.innerText = "Guardando archivo en la nube...";
-    subtitle.style.color = "#f39c12";
+            const subtitle = document.getElementById('main-subtitle');
+            subtitle.innerText = "Guardando archivo en la nube...";
+            subtitle.style.color = "#f39c12";
 
-    fetch(GAS_URL, {
-        method: 'POST',
-        mode: 'no-cors', // <--- Agregamos esto para evitar el bloqueo del navegador
-        headers: { 'Content-Type': 'text/plain' },
-        body: JSON.stringify(payload)
-    }).then(() => {
-        // Al usar 'no-cors', el navegador no puede confirmar si Google recibió el dato,
-        // pero en el 99% de los casos la información llega correctamente.
-        subtitle.innerText = "¡Sincronización enviada!";
-        subtitle.style.color = "#27ae60";
-        setTimeout(() => { 
-            subtitle.innerText = "Panel de Seminuevos y Servicio"; 
-            subtitle.style.color = "var(--hyundai-light-blue)"; 
-        }, 3000);
-    }).catch(e => {
-        console.error(e);
-        subtitle.innerText = "Error crítico de conexión";
-        subtitle.style.color = "#c0392b";
-    });
-}
+            fetch(GAS_URL, {
+                method: 'POST',
+                mode: 'no-cors',
+                headers: { 'Content-Type': 'text/plain' },
+                body: JSON.stringify(payload)
+            }).then(() => {
+                subtitle.innerText = "¡Sincronización enviada!";
+                subtitle.style.color = "#27ae60";
+                setTimeout(() => { 
+                    subtitle.innerText = "Panel de Seminuevos y Servicio"; 
+                    subtitle.style.color = "var(--hyundai-light-blue)"; 
+                }, 3000);
+            }).catch(e => {
+                console.error(e);
+                subtitle.innerText = "Error crítico de conexión";
+                subtitle.style.color = "#c0392b";
+            });
+        }
 
         // ----- UTILIDADES -----
         function normalizeString(s) {
@@ -361,7 +358,7 @@
             str = str.replace(/\bMT\b/g, 'TM');
             str = str.replace(/GRANDI10/g, 'GRAND I10');
             str = str.replace(/PREMUIM/g, 'PREMIUM');
-            str = str.replace(/[^A-Z0-9 ]/g, ' ');
+            str = str.replace(/[^A-Z0-9. ]/g, ' '); // Permitimos punto para motores 1.5, 2.0
             return str.replace(/\s+/g, ' ').trim();
         }
 
@@ -390,7 +387,6 @@
                 document.getElementById('status-azul').style.color = "#27ae60";
                 document.getElementById('btn-go-s1').disabled = false;
 
-                // Enviar a la nube automáticamente
                 saveToCloud({ tipo: 'azul', dbInventario: dbInventario });
             };
             reader.readAsArrayBuffer(file);
@@ -474,7 +470,6 @@
                 const wb = XLSX.read(new Uint8Array(evt.target.result), {type: 'array'});
                 rawCitasExcel = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], {header: 1});
                 
-                // Pedir la contraseña para el PDF
                 document.getElementById('modal-box-content').innerHTML = `
                     <h3>Seguridad del Archivo PDF</h3>
                     <p style="font-size:11px; color:#666;">Defina una clave que se pedirá al descargar el reporte de estas citas.</p>
@@ -497,13 +492,17 @@
                 document.getElementById('btn-go-s2').disabled = false;
                 renderCitas();
                 
-                // Enviar a la nube automáticamente
                 saveToCloud({ tipo: 'citas', rawCitasExcel: rawCitasExcel, nameCitas: nameCitas, pdfPass: currentPass });
             } else { alert("Las contraseñas no coinciden o están vacías."); }
         }
 
         function saveObs(vin, text) { observacionesData[vin] = text; }
 
+        /**
+         * FUNCIÓN MEJORADA: renderCitas
+         * Se agregó lógica estricta para diferenciar modelos similares (Creta vs Creta Grand)
+         * y validación de motorización (1.5, 2.0, 2.5) para evitar saltos de línea erróneos.
+         */
         function renderCitas() {
             const tbody = document.getElementById('citas-tbody');
             tbody.innerHTML = "";
@@ -525,40 +524,54 @@
                     let tokensCitas = dUniNorm.split(' ').filter(x=>x);
 
                     let pRef = "Ver S1";
-                    let maxScore = -100;
+                    let maxScore = -500;
                     let mejorMatch = null;
 
                     if(dbInventario[anio]) {
                         for(let m in dbInventario[anio]) {
                             let mNorm = normalizeString(m);
-                            let modelTokens = mNorm.split(' ').filter(x=>x);
                             
-                            let containsAllModelTokens = modelTokens.every(t => tokensCitas.includes(t));
-                            
-                            let exactModelCheck = true;
-                            if(mNorm === "CRETA" && tokensCitas.includes("GRAND")) exactModelCheck = false;
-                            if(mNorm === "CRETA GRAND" && !tokensCitas.includes("GRAND")) exactModelCheck = false;
+                            // VALIDACIÓN ESTRICA DE MODELO (CRETA vs CRETA GRAND)
+                            let isGrandCita = dUniNorm.includes("GRAND");
+                            let isGrandLibro = mNorm.includes("GRAND");
+                            if (isGrandCita !== isGrandLibro) continue; 
 
-                            if(containsAllModelTokens && exactModelCheck) {
+                            let modelTokens = mNorm.split(' ').filter(x=>x);
+                            let containsAllModelTokens = modelTokens.every(t => tokensCitas.includes(t));
+
+                            if(containsAllModelTokens) {
                                 dbInventario[anio][m].forEach(ver => {
-                                    let verTokens = normalizeString(ver.v).split(' ').filter(x=>x);
-                                    let score = modelTokens.length * 10; 
+                                    let vNorm = normalizeString(ver.v);
+                                    let score = 0;
                                     
+                                    // 1. Validar Motor (Crucial para no "atorarse" en otra versión)
+                                    // Buscamos patrones como 1.5, 2.0, 2.5
+                                    let motores = ["1.0", "1.2", "1.4", "1.5", "1.6", "2.0", "2.4", "2.5"];
+                                    let motorCita = motores.find(mot => dUniNorm.includes(mot));
+                                    let motorLibro = motores.find(mot => vNorm.includes(mot));
+                                    
+                                    if (motorCita && motorLibro && motorCita !== motorLibro) {
+                                        score -= 1000; // Penalización máxima si el motor no coincide
+                                    } else if (motorCita && motorLibro && motorCita === motorLibro) {
+                                        score += 200; // Bonus por motor idéntico
+                                    }
+
+                                    // 2. Validar Cilindros (Eliminando espacios para 4CIL vs 4 CIL)
+                                    if (dUniNorm.replace(/\s/g,'').includes("4CIL") && vNorm.replace(/\s/g,'').includes("4CIL")) {
+                                        score += 100;
+                                    }
+
+                                    // 3. Coincidencia de palabras
+                                    let verTokens = vNorm.split(' ').filter(x=>x);
                                     verTokens.forEach(t => {
-                                        if(tokensCitas.includes(t)) score += 5; 
-                                        else score -= 2;
+                                        if(tokensCitas.includes(t)) score += 20;
+                                        else score -= 5;
                                     });
 
-                                    // CORRECCIÓN APLICADA AQUÍ: Comparación estricta sin espacios
-                                    // Esto soluciona que "4 CIL" y "4CIL" rompan el puntaje de coincidencia.
-                                    let citaSinEspacios = dUniNorm.replace(/\s+/g, '');
-                                    let versionSinEspacios = normalizeString(ver.v).replace(/\s+/g, '');
-                                    
-                                    if(citaSinEspacios.includes(versionSinEspacios)) {
-                                        score += 50; // Otorga un puntaje sumamente alto para asegurar que gane la coincidencia sin importar el espacio.
-                                    } else if(dUniNorm.includes(normalizeString(ver.v))) {
-                                        score += 20;
-                                    }
+                                    // 4. Coincidencia Exacta de Versión (sin espacios)
+                                    let citaCompacta = dUniNorm.replace(/\s+/g, '');
+                                    let verCompacta = vNorm.replace(/\s+/g, '');
+                                    if(citaCompacta.includes(verCompacta)) score += 300;
 
                                     if(score > maxScore) {
                                         maxScore = score;
@@ -569,7 +582,7 @@
                         }
                     }
 
-                    if(mejorMatch !== null) {
+                    if(mejorMatch !== null && maxScore > 0) {
                         pRef = new Intl.NumberFormat('es-MX',{style:'currency',currency:'MXN'}).format(mejorMatch);
                     }
 
@@ -593,7 +606,6 @@
             document.getElementById('s2-title-db').innerText = "BASE: " + nameCitas;
         }
 
-        // ----- DESCARGA PDF -----
         function promptPdfPassword() {
             document.getElementById('modal-box-content').innerHTML = `
                 <h3>Descarga Autorizada</h3>
