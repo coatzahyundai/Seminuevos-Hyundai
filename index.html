@@ -280,62 +280,52 @@
          * FUNCIÓN DE SINCRONIZACIÓN MEJORADA
          * Ahora es más robusta para evitar que se quede "cargando" si no hay datos.
          */
-        function fetchCloudData() {
-            const subtitle = document.getElementById('main-subtitle');
-            subtitle.innerText = "Sincronizando información de la nube...";
-            subtitle.style.color = "#f39c12";
+       function fetchCloudData() {
+    const subtitle = document.getElementById('main-subtitle');
+    subtitle.innerText = "Sincronizando información de la nube...";
+    subtitle.style.color = "#f39c12";
 
-            fetch(GAS_URL)
-                .then(response => {
-                    if (!response.ok) throw new Error("Error de red");
-                    return response.json();
-                })
-                .then(data => {
-                    if(!data) throw new Error("Sin respuesta de datos");
-                    
-                    let hasAzul = false;
-                    let hasCitas = false;
+    // Habilitamos botones de inmediato para que el usuario no se quede bloqueado
+    document.getElementById('btn-go-s1').disabled = false;
+    document.getElementById('btn-go-s2').disabled = false;
 
-                    // Procesar Libro Azul
-                    if(data.dbInventario && Object.keys(data.dbInventario).length > 0) {
-                        dbInventario = data.dbInventario;
-                        fillYears();
-                        document.getElementById('status-azul').innerText = "Sincronizado (Nube)";
-                        document.getElementById('status-azul').style.color = "#27ae60";
-                        document.getElementById('btn-go-s1').disabled = false;
-                        hasAzul = true;
-                    } else {
-                        document.getElementById('status-azul').innerText = "Nube vacía: requiere carga";
-                    }
+    fetch(GAS_URL)
+        .then(response => response.json())
+        .then(data => {
+            if(data.error) { throw new Error(data.error); }
 
-                    // Procesar Citas
-                    if(data.rawCitasExcel && data.rawCitasExcel.length > 0) {
-                        rawCitasExcel = data.rawCitasExcel;
-                        nameCitas = data.nameCitas || "Base Nube";
-                        currentPass = data.pdfPass || "HYUNDAICOATZA2026";
-                        document.getElementById('status-citas').innerText = "Sincronizado (Nube)";
-                        document.getElementById('status-citas').style.color = "#27ae60";
-                        document.getElementById('btn-go-s2').disabled = false;
-                        renderCitas();
-                        hasCitas = true;
-                    } else {
-                        document.getElementById('status-citas').innerText = "Nube vacía: requiere carga";
-                    }
-                    
-                    if (hasAzul || hasCitas) {
-                        subtitle.innerText = "Panel de Seminuevos y Servicio (Sincronizado)";
-                        subtitle.style.color = "#27ae60";
-                    } else {
-                        subtitle.innerText = "Panel de Seminuevos y Servicio (Sin datos previos)";
-                        subtitle.style.color = "var(--hyundai-light-blue)";
-                    }
-                })
-                .catch(error => {
-                    console.error("Error al obtener de la nube:", error);
-                    subtitle.innerText = "Error de conexión: Trabaje en modo local";
-                    subtitle.style.color = "#c0392b";
-                });
-        }
+            // Procesar Libro Azul si existe
+            if(data.dbInventario && Object.keys(data.dbInventario).length > 0) {
+                dbInventario = data.dbInventario;
+                fillYears();
+                document.getElementById('status-azul').innerText = "Sincronizado (Nube)";
+                document.getElementById('status-azul').style.color = "#27ae60";
+            } else {
+                document.getElementById('status-azul').innerText = "Sin datos en nube";
+            }
+
+            // Procesar Citas si existen
+            if(data.rawCitasExcel && data.rawCitasExcel.length > 0) {
+                rawCitasExcel = data.rawCitasExcel;
+                nameCitas = data.nameCitas || "Base Nube";
+                currentPass = data.pdfPass || "HYUNDAICOATZA2026";
+                document.getElementById('status-citas').innerText = "Sincronizado (Nube)";
+                document.getElementById('status-citas').style.color = "#27ae60";
+                renderCitas();
+            } else {
+                document.getElementById('status-citas').innerText = "Sin datos en nube";
+            }
+            
+            subtitle.innerText = "Panel de Seminuevos y Servicio (Listo)";
+            subtitle.style.color = "#27ae60";
+        })
+        .catch(error => {
+            console.error("Error de sincronización:", error);
+            subtitle.innerText = "Modo Local: Cargue archivos manualmente";
+            subtitle.style.color = "#c0392b";
+            // Aun con error, los botones ya están habilitados arriba
+        });
+}
 
         function saveToCloud(payload) {
             const subtitle = document.getElementById('main-subtitle');
