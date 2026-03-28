@@ -549,7 +549,16 @@
                                         else score -= 2;
                                     });
 
-                                    if(dUniNorm.includes(normalizeString(ver.v))) score += 20;
+                                    // CORRECCIÓN APLICADA AQUÍ: Comparación estricta sin espacios
+                                    // Esto soluciona que "4 CIL" y "4CIL" rompan el puntaje de coincidencia.
+                                    let citaSinEspacios = dUniNorm.replace(/\s+/g, '');
+                                    let versionSinEspacios = normalizeString(ver.v).replace(/\s+/g, '');
+                                    
+                                    if(citaSinEspacios.includes(versionSinEspacios)) {
+                                        score += 50; // Otorga un puntaje sumamente alto para asegurar que gane la coincidencia sin importar el espacio.
+                                    } else if(dUniNorm.includes(normalizeString(ver.v))) {
+                                        score += 20;
+                                    }
 
                                     if(score > maxScore) {
                                         maxScore = score;
