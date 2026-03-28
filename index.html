@@ -252,7 +252,7 @@
     </div>
 
     <script>
-        const GAS_URL = "https://script.google.com/macros/s/AKfycbwdVXaRH-Op4UFQV7teGigU6Y9fhdz8K_NqyvOtKRDW51WDpOjube6vqJ4JBV1iiTU/exec";
+        const GAS_URL = "https://script.google.com/macros/s/AKfycbyi_UULUHrnykrhzaXr3sUQxF25Z_BPc3exLQRmZeGeeEzP8tWy92QMybRAhguZspJ3/exec";
         
         let dbInventario = {};
         let rawCitasExcel = [];
@@ -276,23 +276,39 @@
             if (e.key === 'Enter') checkPassword();
         });
 
+        /**
+         * FUNCIÓN DE SINCRONIZACIÓN MEJORADA
+         * Ahora es más robusta para evitar que se quede "cargando" si no hay datos.
+         */
         function fetchCloudData() {
             const subtitle = document.getElementById('main-subtitle');
             subtitle.innerText = "Sincronizando información de la nube...";
             subtitle.style.color = "#f39c12";
 
             fetch(GAS_URL)
-                .then(response => response.json())
+                .then(response => {
+                    if (!response.ok) throw new Error("Error de red");
+                    return response.json();
+                })
                 .then(data => {
-                    let synced = false;
+                    if(!data) throw new Error("Sin respuesta de datos");
+                    
+                    let hasAzul = false;
+                    let hasCitas = false;
+
+                    // Procesar Libro Azul
                     if(data.dbInventario && Object.keys(data.dbInventario).length > 0) {
                         dbInventario = data.dbInventario;
                         fillYears();
                         document.getElementById('status-azul').innerText = "Sincronizado (Nube)";
                         document.getElementById('status-azul').style.color = "#27ae60";
                         document.getElementById('btn-go-s1').disabled = false;
-                        synced = true;
+                        hasAzul = true;
+                    } else {
+                        document.getElementById('status-azul').innerText = "Nube vacía: requiere carga";
                     }
+
+                    // Procesar Citas
                     if(data.rawCitasExcel && data.rawCitasExcel.length > 0) {
                         rawCitasExcel = data.rawCitasExcel;
                         nameCitas = data.nameCitas || "Base Nube";
@@ -301,15 +317,22 @@
                         document.getElementById('status-citas').style.color = "#27ae60";
                         document.getElementById('btn-go-s2').disabled = false;
                         renderCitas();
-                        synced = true;
+                        hasCitas = true;
+                    } else {
+                        document.getElementById('status-citas').innerText = "Nube vacía: requiere carga";
                     }
                     
-                    subtitle.innerText = synced ? "Panel de Seminuevos y Servicio (Actualizado)" : "Panel de Seminuevos y Servicio (Sin datos)";
-                    subtitle.style.color = synced ? "#27ae60" : "var(--hyundai-light-blue)";
+                    if (hasAzul || hasCitas) {
+                        subtitle.innerText = "Panel de Seminuevos y Servicio (Sincronizado)";
+                        subtitle.style.color = "#27ae60";
+                    } else {
+                        subtitle.innerText = "Panel de Seminuevos y Servicio (Sin datos previos)";
+                        subtitle.style.color = "var(--hyundai-light-blue)";
+                    }
                 })
                 .catch(error => {
                     console.error("Error al obtener de la nube:", error);
-                    subtitle.innerText = "Modo Local (Error de conexión con la nube)";
+                    subtitle.innerText = "Error de conexión: Trabaje en modo local";
                     subtitle.style.color = "#c0392b";
                 });
         }
@@ -358,7 +381,7 @@
             str = str.replace(/\bMT\b/g, 'TM');
             str = str.replace(/GRANDI10/g, 'GRAND I10');
             str = str.replace(/PREMUIM/g, 'PREMIUM');
-            str = str.replace(/[^A-Z0-9. ]/g, ' '); // Permitimos punto para motores 1.5, 2.0
+            str = str.replace(/[^A-Z0-9. ]/g, ' ');
             return str.replace(/\s+/g, ' ').trim();
         }
 
@@ -498,11 +521,6 @@
 
         function saveObs(vin, text) { observacionesData[vin] = text; }
 
-        /**
-         * FUNCIÓN MEJORADA: renderCitas
-         * Se agregó lógica estricta para diferenciar modelos similares (Creta vs Creta Grand)
-         * y validación de motorización (1.5, 2.0, 2.5) para evitar saltos de línea erróneos.
-         */
         function renderCitas() {
             const tbody = document.getElementById('citas-tbody');
             tbody.innerHTML = "";
@@ -530,8 +548,6 @@
                     if(dbInventario[anio]) {
                         for(let m in dbInventario[anio]) {
                             let mNorm = normalizeString(m);
-                            
-                            // VALIDACIÓN ESTRICA DE MODELO (CRETA vs CRETA GRAND)
                             let isGrandCita = dUniNorm.includes("GRAND");
                             let isGrandLibro = mNorm.includes("GRAND");
                             if (isGrandCita !== isGrandLibro) continue; 
@@ -543,32 +559,21 @@
                                 dbInventario[anio][m].forEach(ver => {
                                     let vNorm = normalizeString(ver.v);
                                     let score = 0;
-                                    
-                                    // 1. Validar Motor (Crucial para no "atorarse" en otra versión)
-                                    // Buscamos patrones como 1.5, 2.0, 2.5
                                     let motores = ["1.0", "1.2", "1.4", "1.5", "1.6", "2.0", "2.4", "2.5"];
                                     let motorCita = motores.find(mot => dUniNorm.includes(mot));
                                     let motorLibro = motores.find(mot => vNorm.includes(mot));
                                     
-                                    if (motorCita && motorLibro && motorCita !== motorLibro) {
-                                        score -= 1000; // Penalización máxima si el motor no coincide
-                                    } else if (motorCita && motorLibro && motorCita === motorLibro) {
-                                        score += 200; // Bonus por motor idéntico
-                                    }
+                                    if (motorCita && motorLibro && motorCita !== motorLibro) score -= 1000;
+                                    else if (motorCita && motorLibro && motorCita === motorLibro) score += 200;
 
-                                    // 2. Validar Cilindros (Eliminando espacios para 4CIL vs 4 CIL)
-                                    if (dUniNorm.replace(/\s/g,'').includes("4CIL") && vNorm.replace(/\s/g,'').includes("4CIL")) {
-                                        score += 100;
-                                    }
+                                    if (dUniNorm.replace(/\s/g,'').includes("4CIL") && vNorm.replace(/\s/g,'').includes("4CIL")) score += 100;
 
-                                    // 3. Coincidencia de palabras
                                     let verTokens = vNorm.split(' ').filter(x=>x);
                                     verTokens.forEach(t => {
                                         if(tokensCitas.includes(t)) score += 20;
                                         else score -= 5;
                                     });
 
-                                    // 4. Coincidencia Exacta de Versión (sin espacios)
                                     let citaCompacta = dUniNorm.replace(/\s+/g, '');
                                     let verCompacta = vNorm.replace(/\s+/g, '');
                                     if(citaCompacta.includes(verCompacta)) score += 300;
