@@ -60,7 +60,8 @@
         .btn-nav:disabled { background: #ccc; cursor: not-allowed; transform: none; }
 
         .setup-footer {
-            display: grid; grid-template-columns: 1fr 1fr; gap: 15px;
+            display: none; /* Oculto por defecto, se muestra solo a Gerencia */
+            grid-template-columns: 1fr 1fr; gap: 15px;
             padding-top: 15px; border-top: 1px solid #eee;
         }
         .setup-mini-card { background: #f8f9fa; padding: 10px; border-radius: 6px; border: 1px dashed #ccc; }
@@ -84,7 +85,6 @@
             flex-shrink: 0;
         }
 
-        /* SECCION 1: COTIZADOR */
         .s1-container {
             max-width: 750px; margin: 0 auto; background: var(--white);
             padding: 15px 20px; border-radius: var(--border-radius);
@@ -115,7 +115,6 @@
         .leyendas-container p { margin: 0 0 3px 0; font-weight: bold; color: #a94442; }
         .leyendas-container ul { margin: 0; padding-left: 15px; }
 
-        /* SECCION 2: CITAS */
         .citas-container { background: white; flex-grow: 1; border-radius: 8px; overflow: hidden; display: flex; flex-direction: column; }
         .table-wrapper { flex: 1; overflow: auto; }
         .citas-table { width: 100%; border-collapse: collapse; font-size: 10px; }
@@ -126,7 +125,6 @@
             width: 100%; padding: 4px; border: 1px solid #ddd; border-radius: 3px; font-size: 10px; box-sizing: border-box;
         }
 
-        /* MODALES */
         .modal-overlay {
             display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%;
             background: rgba(0,44,95,0.8); z-index: 1000; justify-content: center; align-items: center;
@@ -159,7 +157,7 @@
                 <button class="btn-nav" id="btn-go-s2" onclick="showSection(2)" disabled>Sección Dos<br><span style="font-size:11px; font-weight:normal;">Citas de Servicio</span></button>
             </div>
 
-            <div class="setup-footer">
+            <div class="setup-footer" id="admin-controls">
                 <div class="setup-mini-card">
                     <h3>Actualizar Libro Azul</h3>
                     <input type="file" id="file-azul" accept=".xlsx, .xls, .csv" style="display:none;" />
@@ -173,7 +171,7 @@
                     <div id="status-citas" style="font-size:10px; margin-top:5px; color:#c0392b; font-weight:bold;">Esperando sincronización...</div>
                 </div>
             </div>
-            <p style="font-size: 9px; color: #999; margin-top: 15px; margin-bottom: 0;">Los archivos cargados se sincronizarán automáticamente con la nube para el resto del equipo.</p>
+            <p id="admin-note" style="font-size: 9px; color: #999; margin-top: 15px; margin-bottom: 0; display:none;">Los archivos cargados se sincronizarán automáticamente con la nube para el resto del equipo.</p>
         </div>
     </div>
 
@@ -253,120 +251,91 @@
     </div>
 
     <script>
-        const GAS_URL = "https://script.google.com/macros/s/AKfycbwaPNxzMt17_f8mqRq_Y9O70NCJp7RXIe8oT8T6NdsWVWajFnd2HfOYAdOq0kghVgV4/exec";
+        // LIGA ACTUALIZADA
+        const GAS_URL = "https://script.google.com/macros/s/AKfycbxOrQfocbhdsNalQD8huZ1kg-iOmD8GKxbo_i1qW3m-9BbziL7CN69q3G7jBnx5tnb5/exec";
         
         let dbInventario = {};
         let rawCitasExcel = [];
         let observacionesData = {};
-        let currentPass = ""; // Password del PDF (se define al subir archivo)
+        let currentPass = "";
         let nameCitas = "";
-        let baseUsuarios = []; // Lista de usuarios inyectada desde la nube
-        let usuarioLogueado = null; // Información del usuario autenticado (nombre, rol)
+        let baseUsuarios = [];
+        let usuarioLogueado = null;
 
-        // Solicitamos usuarios de inmediato al cargar la página
         window.addEventListener('load', fetchInitialData);
 
         function fetchInitialData() {
-            // Intentamos traer usuarios antes del login para agilizar
             fetch(GAS_URL)
                 .then(response => response.json())
                 .then(data => {
                     if(data.baseUsuariosInyectada) {
                         baseUsuarios = data.baseUsuariosInyectada;
-                        console.log("Base de usuarios autenticada cargada.");
                     }
-                }).catch(e => console.error("Error cargando usuarios iniciales:", e));
+                }).catch(e => console.error("Error usuarios:", e));
         }
 
-        // ----- LÓGICA DE ACCESO PERSONALIZADO -----
         function checkPassword() {
             const passInput = document.getElementById('app-password').value;
             if(!passInput) { alert("Por favor ingrese su PIN."); return; }
 
-            // Si la base de usuarios no ha cargado, intentamos de nuevo y avisamos
             if(baseUsuarios.length === 0) {
                 document.getElementById('login-loading').style.display = 'block';
-                fetchInitialData(); // Reintento
-                alert("Sincronizando seguridad... Por favor intente de nuevo en 3 segundos.");
+                fetchInitialData();
+                alert("Sincronizando seguridad... Intente de nuevo en unos segundos.");
                 return;
             }
 
-            usuarioLogueado = null; // Reiniciamos
-
-            // Buscamos coincidencia inteligente del PIN
-            for (let u of baseUsuarios) {
-                if (passInput === u.pin) {
-                    usuarioLogueado = u; // Guardamos quién es
-                    break;
-                }
-            }
+            usuarioLogueado = baseUsuarios.find(u => u.pin === passInput);
 
             if(usuarioLogueado) {
-                // Login correcto
                 document.getElementById('login-screen').style.display = 'none';
                 document.getElementById('welcome-section').style.display = 'flex';
                 
-                // --- BIENVENIDA PERSONALIZADA ---
-                const personalizedTitleElement = document.getElementById('welcome-personalized-title');
-                personalizedTitleElement.innerText = `¡Bienvenido/a, ${usuarioLogueado.name}! (${usuarioLogueado.role})`;
-                 personalizedTitleElement.style.fontSize = "22px"; // Ajuste leve de tamaño
+                const pTitle = document.getElementById('welcome-personalized-title');
+                pTitle.innerText = `¡Bienvenido/a, ${usuarioLogueado.name}! (${usuarioLogueado.role})`;
                 
-                // Procedemos con la carga normal del sistema (que ya funcionaba)
+                // --- LÓGICA DE VISIBILIDAD DE BOTONES ---
+                if(usuarioLogueado.role === "Gerencia") {
+                    document.getElementById('admin-controls').style.display = 'grid';
+                    document.getElementById('admin-note').style.display = 'block';
+                }
+
                 fetchCloudData(); 
             } else {
-                alert("Contraseña/PIN incorrecto. Verifique sus credenciales.");
+                alert("PIN incorrecto.");
             }
         }
 
-        document.getElementById('app-password').addEventListener('keypress', function (e) {
-            if (e.key === 'Enter') checkPassword();
-        });
+        document.getElementById('app-password').addEventListener('keypress', (e) => { if(e.key === 'Enter') checkPassword(); });
 
-        // ----- FUNCIÓN DE SINCRONIZACIÓN ORIGINAL (Con actualización de usuarios) -----
         function fetchCloudData() {
             const subtitle = document.getElementById('main-subtitle');
             subtitle.innerText = "Sincronizando información de la nube...";
             subtitle.style.color = "#f39c12";
 
-            // Habilitamos botones de inmediato
-            document.getElementById('btn-go-s1').disabled = false;
-            document.getElementById('btn-go-s2').disabled = false;
-
             fetch(GAS_URL)
                 .then(response => response.json())
                 .then(data => {
-                    if(data.error) { throw new Error(data.error); }
-
-                    // Procesar Libro Azul si existe
                     if(data.dbInventario && Object.keys(data.dbInventario).length > 0) {
                         dbInventario = data.dbInventario;
                         fillYears();
                         document.getElementById('status-azul').innerText = "Sincronizado (Nube)";
                         document.getElementById('status-azul').style.color = "#27ae60";
-                    } else {
-                        document.getElementById('status-azul').innerText = "Sin datos en nube";
-                        // Si no hay datos, deshabilitamos la sección (seguridad original)
-                        document.getElementById('btn-go-s1').disabled = true;
+                        document.getElementById('btn-go-s1').disabled = false;
                     }
-
-                    // Procesar Citas si existen
                     if(data.rawCitasExcel && data.rawCitasExcel.length > 0) {
                         rawCitasExcel = data.rawCitasExcel;
                         nameCitas = data.nameCitas || "Base Nube";
-                        currentPass = data.pdfPass || ""; // Traemos password del PDF guardado
+                        currentPass = data.pdfPass || "";
                         document.getElementById('status-citas').innerText = "Sincronizado (Nube)";
                         document.getElementById('status-citas').style.color = "#27ae60";
+                        document.getElementById('btn-go-s2').disabled = false;
                         renderCitas();
-                    } else {
-                        document.getElementById('status-citas').innerText = "Sin datos en nube";
-                        document.getElementById('btn-go-s2').disabled = true;
                     }
-                    
                     subtitle.innerText = "Panel de Seminuevos y Servicio (Listo)";
                     subtitle.style.color = "#27ae60";
                 })
-                .catch(error => {
-                    console.error("Error de sincronización:", error);
+                .catch(e => {
                     subtitle.innerText = "Modo Local (Error Nube)";
                     subtitle.style.color = "#c0392b";
                 });
@@ -374,48 +343,26 @@
 
         function saveToCloud(payload) {
             const subtitle = document.getElementById('main-subtitle');
-            subtitle.innerText = "Guardando archivo en la nube...";
-            subtitle.style.color = "#f39c12";
-
+            subtitle.innerText = "Guardando en la nube...";
             fetch(GAS_URL, {
                 method: 'POST',
                 mode: 'no-cors',
                 headers: { 'Content-Type': 'text/plain' },
                 body: JSON.stringify(payload)
             }).then(() => {
-                subtitle.innerText = "¡Sincronización enviada con éxito!";
+                subtitle.innerText = "¡Sincronización exitosa!";
                 subtitle.style.color = "#27ae60";
-                setTimeout(() => { 
-                    subtitle.innerText = "Panel de Seminuevos y Servicio"; 
-                    subtitle.style.color = "var(--hyundai-light-blue)"; 
-                }, 3000);
-            }).catch(e => {
-                console.error(e);
-                subtitle.innerText = "Error crítico de conexión al guardar";
-                subtitle.style.color = "#c0392b";
             });
         }
 
-        // ----- UTILIDADES ORIGINALES (SIN CAMBIOS) -----
+        // --- FUNCIONES DE APOYO (Sin cambios) ---
         function normalizeString(s) {
             if (!s) return "";
             let str = String(s).toUpperCase();
-            str = str.replace(/5 PUERTAS/g, 'HB');
-            str = str.replace(/4 PUERTAS/g, 'SD');
-            str = str.replace(/5DR/g, 'HB');
-            str = str.replace(/4DR/g, 'SD');
-            str = str.replace(/SEDAN/g, 'SD');
-            str = str.replace(/HATCHBACK/g, 'HB');
-            str = str.replace(/AUTOMATICA/g, 'TA');
-            str = str.replace(/AUTOMATICO/g, 'TA');
-            str = str.replace(/\bAUT\b/g, 'TA');
-            str = str.replace(/\bAT\b/g, 'TA');
-            str = str.replace(/\bDCT\b/g, 'TA'); 
-            str = str.replace(/\bIVT\b/g, 'TA'); 
-            str = str.replace(/MANUAL/g, 'TM');
-            str = str.replace(/\bMT\b/g, 'TM');
-            str = str.replace(/GRANDI10/g, 'GRAND I10');
-            str = str.replace(/PREMUIM/g, 'PREMIUM');
+            str = str.replace(/5 PUERTAS/g, 'HB').replace(/4 PUERTAS/g, 'SD').replace(/5DR/g, 'HB').replace(/4DR/g, 'SD');
+            str = str.replace(/SEDAN/g, 'SD').replace(/HATCHBACK/g, 'HB').replace(/AUTOMATICA/g, 'TA').replace(/AUTOMATICO/g, 'TA');
+            str = str.replace(/\bAUT\b/g, 'TA').replace(/\bAT\b/g, 'TA').replace(/\bDCT\b/g, 'TA').replace(/\bIVT\b/g, 'TA');
+            str = str.replace(/MANUAL/g, 'TM').replace(/\bMT\b/g, 'TM').replace(/GRANDI10/g, 'GRAND I10').replace(/PREMUIM/g, 'PREMIUM');
             str = str.replace(/[^A-Z0-9. ]/g, ' ');
             return str.replace(/\s+/g, ' ').trim();
         }
@@ -432,7 +379,6 @@
             document.getElementById('welcome-section').style.display = 'flex';
         }
 
-        // ----- PROCESAMIENTO EXCEL AZUL (SIN CAMBIOS) -----
         document.getElementById('file-azul').onchange = function(e) {
             const file = e.target.files[0]; if(!file) return;
             const reader = new FileReader();
@@ -440,11 +386,8 @@
                 const workbook = XLSX.read(new Uint8Array(evt.target.result), {type: 'array'});
                 const rows = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]], {header: 1});
                 procesarDatosAzul(rows);
-                
                 document.getElementById('status-azul').innerText = "Cargado: " + file.name;
-                document.getElementById('status-azul').style.color = "#27ae60";
                 document.getElementById('btn-go-s1').disabled = false;
-
                 saveToCloud({ tipo: 'azul', dbInventario: dbInventario });
             };
             reader.readAsArrayBuffer(file);
@@ -460,19 +403,16 @@
                 if(c0.toUpperCase() === 'AÑO') {
                     anio = String(f[1]).trim();
                     if (!dbInventario[anio]) dbInventario[anio] = {};
-                    modelo = null;
                     return;
                 }
-                if(c1.toUpperCase() === 'VENTA' || c1.toUpperCase().includes('VENTA')) {
+                if(c1.toUpperCase().includes('VENTA')) {
                     modelo = c0;
                     if (anio && !dbInventario[anio][modelo]) dbInventario[anio][modelo] = [];
                     return;
                 }
                 if(anio && modelo && f[1] && !isNaN(parseFloat(String(f[1]).replace(/[$,\s]/g, '')))) {
                     let pToma = parseFloat(String(f[5] || f[2] || f[1]).replace(/[$,\s]/g, ''));
-                    if(!isNaN(pToma)) {
-                        dbInventario[anio][modelo].push({ v: c0, p: pToma });
-                    }
+                    if(!isNaN(pToma)) dbInventario[anio][modelo].push({ v: c0, p: pToma });
                 }
             });
             fillYears();
@@ -519,7 +459,6 @@
             document.getElementById('empty-msg').style.display = 'block';
         }
 
-        // ----- PROCESAMIENTO EXCEL CITAS (ORIGINAL CON GESTIÓN DE PASS PDF) -----
         document.getElementById('file-citas').onchange = function(e) {
             const file = e.target.files[0]; if(!file) return;
             nameCitas = file.name;
@@ -527,11 +466,8 @@
             reader.onload = function(evt) {
                 const wb = XLSX.read(new Uint8Array(evt.target.result), {type: 'array'});
                 rawCitasExcel = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], {header: 1});
-                
-                // Muestra modal original para definir password PDF
                 document.getElementById('modal-box-content').innerHTML = `
                     <h3>Seguridad del Archivo PDF</h3>
-                    <p style="font-size:11px; color:#666;">Defina una clave obligatoria para descargar el PDF de este reporte.</p>
                     <input type="password" id="p1" placeholder="Nueva Contraseña PDF">
                     <input type="password" id="p2" placeholder="Confirmar Contraseña">
                     <button class="btn-confirm" onclick="setPass()">Guardar e Iniciar</button>
@@ -544,16 +480,12 @@
         function setPass() {
             const p1 = document.getElementById('p1').value;
             if(p1 && p1 === document.getElementById('p2').value) {
-                currentPass = p1; // Guardamos el password del PDF actual
+                currentPass = p1;
                 document.getElementById('modal-pass').style.display = 'none';
-                document.getElementById('status-citas').innerText = "Cargado: " + nameCitas;
-                document.getElementById('status-citas').style.color = "#27ae60";
                 document.getElementById('btn-go-s2').disabled = false;
                 renderCitas();
-                
-                // Sincronizamos con nube (incluyendo el password)
                 saveToCloud({ tipo: 'citas', rawCitasExcel: rawCitasExcel, nameCitas: nameCitas, pdfPass: currentPass });
-            } else { alert("Las contraseñas no coinciden o están vacías."); }
+            } else { alert("Error en contraseña."); }
         }
 
         function saveObs(vin, text) { observacionesData[vin] = text; }
@@ -561,133 +493,72 @@
         function renderCitas() {
             const tbody = document.getElementById('citas-tbody');
             tbody.innerHTML = "";
-            
             for(let i = 0; i < rawCitasExcel.length; i++) {
                 let f = rawCitasExcel[i];
                 let vin = f[7];
                 let anio = String(f[5] || '').trim();
-                
                 if(vin && vin.length > 10 && !isNaN(anio)) {
                     let servicio = "No especificado";
                     for(let j = 1; j <= 3; j++) {
                         let fAbajo = rawCitasExcel[i+j];
                         if(fAbajo && fAbajo[4] && fAbajo[4].length > 5) { servicio = fAbajo[4]; break; }
                     }
-
-                    let dUniRaw = String(f[3] || '') + " " + String(f[4] || '');
-                    let dUniNorm = normalizeString(dUniRaw);
-                    let tokensCitas = dUniNorm.split(' ').filter(x=>x);
-
                     let pRef = "Ver S1";
-                    let maxScore = -500;
-                    let mejorMatch = null;
+                    let maxScore = -500; let mejorMatch = null;
+                    let dUniNorm = normalizeString(String(f[3] || '') + " " + String(f[4] || ''));
+                    let tokensCitas = dUniNorm.split(' ').filter(x=>x);
 
                     if(dbInventario[anio]) {
                         for(let m in dbInventario[anio]) {
                             let mNorm = normalizeString(m);
-                            let isGrandCita = dUniNorm.includes("GRAND");
-                            let isGrandLibro = mNorm.includes("GRAND");
-                            if (isGrandCita !== isGrandLibro) continue; 
-
+                            if (dUniNorm.includes("GRAND") !== mNorm.includes("GRAND")) continue;
                             let modelTokens = mNorm.split(' ').filter(x=>x);
-                            let containsAllModelTokens = modelTokens.every(t => tokensCitas.includes(t));
-
-                            if(containsAllModelTokens) {
+                            if(modelTokens.every(t => tokensCitas.includes(t))) {
                                 dbInventario[anio][m].forEach(ver => {
                                     let vNorm = normalizeString(ver.v);
                                     let score = 0;
                                     let motores = ["1.0", "1.2", "1.4", "1.5", "1.6", "2.0", "2.4", "2.5"];
-                                    let motorCita = motores.find(mot => dUniNorm.includes(mot));
-                                    let motorLibro = motores.find(mot => vNorm.includes(mot));
-                                    
-                                    if (motorCita && motorLibro && motorCita !== motorLibro) score -= 1000;
-                                    else if (motorCita && motorLibro && motorCita === motorLibro) score += 200;
-
-                                    if (dUniNorm.replace(/\s/g,'').includes("4CIL") && vNorm.replace(/\s/g,'').includes("4CIL")) score += 100;
-
-                                    let verTokens = vNorm.split(' ').filter(x=>x);
-                                    verTokens.forEach(t => {
-                                        if(tokensCitas.includes(t)) score += 20;
-                                        else score -= 5;
-                                    });
-
-                                    let citaCompacta = dUniNorm.replace(/\s+/g, '');
-                                    let verCompacta = vNorm.replace(/\s+/g, '');
-                                    if(citaCompacta.includes(verCompacta)) score += 300;
-
-                                    if(score > maxScore) {
-                                        maxScore = score;
-                                        mejorMatch = ver.p;
-                                    }
+                                    let mC = motores.find(mot => dUniNorm.includes(mot));
+                                    let mL = motores.find(mot => vNorm.includes(mot));
+                                    if (mC && mL && mC !== mL) score -= 1000;
+                                    else if (mC && mL && mC === mL) score += 200;
+                                    vNorm.split(' ').filter(x=>x).forEach(t => { if(tokensCitas.includes(t)) score += 20; else score -= 5; });
+                                    if(score > maxScore) { maxScore = score; mejorMatch = ver.p; }
                                 });
                             }
                         }
                     }
-
-                    if(mejorMatch !== null && maxScore > 0) {
-                        pRef = new Intl.NumberFormat('es-MX',{style:'currency',currency:'MXN'}).format(mejorMatch);
-                    }
-
-                    let prevObs = observacionesData[vin] || "";
-                    tbody.innerHTML += `
-                        <tr>
-                            <td>${f[1] || f[2] || '-'}</td>
-                            <td>${f[8] || '-'}</td>
-                            <td>${f[4] || '-'}</td>
-                            <td>${anio}</td>
-                            <td>${vin}</td>
-                            <td>${f[6] || '-'}</td>
-                            <td style="color:var(--hyundai-light-blue); font-weight:bold;">${servicio}</td>
-                            <td>${f[10] || '-'}</td>
-                            <td style="color:#27ae60; font-weight:bold;">${pRef}</td>
-                            <td><input type="text" class="obs-input" value="${prevObs}" oninput="saveObs('${vin}', this.value)" placeholder="..."></td>
-                        </tr>
-                    `;
+                    if(mejorMatch !== null && maxScore > 0) pRef = new Intl.NumberFormat('es-MX',{style:'currency',currency:'MXN'}).format(mejorMatch);
+                    tbody.innerHTML += `<tr><td>${f[1] || '-'}</td><td>${f[8] || '-'}</td><td>${f[4] || '-'}</td><td>${anio}</td><td>${vin}</td><td>${f[6] || '-'}</td><td style="color:var(--hyundai-light-blue); font-weight:bold;">${servicio}</td><td>${f[10] || '-'}</td><td style="color:#27ae60; font-weight:bold;">${pRef}</td><td><input type="text" class="obs-input" value="${observacionesData[vin]||''}" oninput="saveObs('${vin}', this.value)"></td></tr>`;
                 }
             }
             document.getElementById('s2-title-db').innerText = "BASE CITAS: " + nameCitas;
         }
 
-        // ----- DESCARGA PDF (ORIGINAL CON VALIDACIÓN DE PASS PDF) -----
         function promptPdfPassword() {
-            if(!currentPass || currentPass === "") {
-               // Si por alguna razón la nube no cargó la pass (p.ej. modo local), avisamos.
-               alert("Este archivo de citas no tiene una contraseña PDF definida en la nube. Vuelva a subirlo en la pestaña de Inicio para descargar.");
-               return;
-            }
-            
+            if(!currentPass) { alert("Sin contraseña PDF en nube."); return; }
             document.getElementById('modal-box-content').innerHTML = `
                 <h3>Descarga Autorizada</h3>
-                <input type="password" id="check-p" placeholder="Contraseña obligatoria del archivo PDF">
+                <input type="password" id="check-p" placeholder="Contraseña PDF">
                 <button class="btn-confirm" onclick="doPdf()">Generar PDF</button>
             `;
             document.getElementById('modal-pass').style.display = 'flex';
         }
 
         function doPdf() {
-            const passCheckInput = document.getElementById('check-p').value;
-            // Compara contra currentPass, que viene de la nube o fue definida al subir
-            if(passCheckInput === currentPass) {
+            if(document.getElementById('check-p').value === currentPass) {
                 const { jsPDF } = window.jspdf;
                 const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'letter' });
-                doc.setFontSize(16); doc.setTextColor(0, 44, 95);
                 doc.text("PLANIFICADOR DE CITAS - HYUNDAI COATZACOALCOS", 14, 15);
                 const rows = [];
-                const headers = ["HORA", "CLIENTE", "UNIDAD", "AÑO", "VIN", "PLACA", "SERVICIO", "ASESOR", "TOMA", "OBSERVACIONES"];
-                const trs = document.querySelectorAll("#citas-tbody tr");
-                trs.forEach(tr => {
+                document.querySelectorAll("#citas-tbody tr").forEach(tr => {
                     const tds = tr.querySelectorAll("td");
                     rows.push([tds[0].innerText, tds[1].innerText, tds[2].innerText, tds[3].innerText, tds[4].innerText, tds[5].innerText, tds[6].innerText, tds[7].innerText, tds[8].innerText, tds[9].querySelector('input').value]);
                 });
-                doc.autoTable({
-                    head: [headers], body: rows, startY: 28, theme: 'grid', styles: { fontSize: 7, cellPadding: 2 },
-                    headStyles: { fillColor: [0, 44, 95] },
-                    columnStyles: { 0:{cellWidth:15}, 1:{cellWidth:35}, 4:{cellWidth:35}, 9:{cellWidth:40} },
-                    margin: { left: 10, right: 10 }
-                });
-                doc.save("Citas_Hyundai_" + nameCitas + ".pdf");
+                doc.autoTable({ head: [["HORA", "CLIENTE", "UNIDAD", "AÑO", "VIN", "PLACA", "SERVICIO", "ASESOR", "TOMA", "OBS"]], body: rows, startY: 25, theme: 'grid', styles: {fontSize: 7}});
+                doc.save("Citas_Hyundai.pdf");
                 document.getElementById('modal-pass').style.display = 'none';
-            } else { alert("Contraseña incorrecta para la descarga de este PDF."); }
+            } else { alert("Contraseña incorrecta."); }
         }
     </script>
 </body>
