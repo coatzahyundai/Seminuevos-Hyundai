@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Hyundai Coatzacoalcos - Gestión Seminuevos</title>
+    <title>Hyundai Coatzacoalcos - Gestión Seminuevos v2.0</title>
     
     <script src="https://cdn.sheetjs.com/xlsx-latest/package/dist/xlsx.full.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
@@ -142,15 +142,16 @@
     <div id="login-screen">
         <div class="welcome-panel" style="max-width: 350px;">
             <h1 class="welcome-title" style="font-size: 20px;">HYUNDAI COATZACOALCOS</h1>
-            <p style="color: var(--hyundai-light-blue); font-size: 13px; margin-bottom: 25px; font-weight: bold;">Acceso Restringido</p>
-            <input type="password" id="app-password" placeholder="Ingrese su contraseña" style="width: 100%; padding: 12px; margin-bottom: 15px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box; text-align: center;">
+            <p style="color: var(--hyundai-light-blue); font-size: 13px; margin-bottom: 25px; font-weight: bold;">Acceso Restringido - Inicie Sesión</p>
+            <input type="password" id="app-password" placeholder="Ingrese su PIN (Contraseña)" style="width: 100%; padding: 12px; margin-bottom: 15px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box; text-align: center;">
             <button onclick="checkPassword()" class="btn-confirm" style="width: 100%;">Ingresar al Sistema</button>
+            <div id="login-loading" style="font-size:11px; margin-top:10px; color:#f39c12; display:none;">Autenticando usuarios con la nube...</div>
         </div>
     </div>
 
     <div id="welcome-section">
         <div class="welcome-panel">
-            <h1 class="welcome-title">HYUNDAI COATZACOALCOS</h1>
+            <h1 class="welcome-title" id="welcome-personalized-title">HYUNDAI COATZACOALCOS</h1>
             <div class="welcome-subtitle" id="main-subtitle">Panel de Seminuevos y Servicio</div>
 
             <div class="nav-grid">
@@ -252,23 +253,68 @@
     </div>
 
     <script>
-        const GAS_URL = "https://script.google.com/macros/s/AKfycbyi_UULUHrnykrhzaXr3sUQxF25Z_BPc3exLQRmZeGeeEzP8tWy92QMybRAhguZspJ3/exec";
+        const GAS_URL = "https://script.google.com/macros/s/AKfycbyeriDZh0CXWZbp_M5gVD5x-7Vy4yhJDmSpHPWE5H3hPgIpW3vGv_dlZQgDE2wnsyoS/exec";
         
         let dbInventario = {};
         let rawCitasExcel = [];
         let observacionesData = {};
-        let currentPass = "";
+        let currentPass = ""; // Password del PDF (se define al subir archivo)
         let nameCitas = "";
+        let baseUsuarios = []; // Lista de usuarios inyectada desde la nube
+        let usuarioLogueado = null; // Información del usuario autenticado (nombre, rol)
 
-        // ----- LÓGICA DE ACCESO Y SINCRONIZACIÓN -----
+        // Solicitamos usuarios de inmediato al cargar la página
+        window.addEventListener('load', fetchInitialData);
+
+        function fetchInitialData() {
+            // Intentamos traer usuarios antes del login para agilizar
+            fetch(GAS_URL)
+                .then(response => response.json())
+                .then(data => {
+                    if(data.baseUsuariosInyectada) {
+                        baseUsuarios = data.baseUsuariosInyectada;
+                        console.log("Base de usuarios autenticada cargada.");
+                    }
+                }).catch(e => console.error("Error cargando usuarios iniciales:", e));
+        }
+
+        // ----- LÓGICA DE ACCESO PERSONALIZADO -----
         function checkPassword() {
             const passInput = document.getElementById('app-password').value;
-            if(passInput === 'HYUNDAICOATZA2026') {
+            if(!passInput) { alert("Por favor ingrese su PIN."); return; }
+
+            // Si la base de usuarios no ha cargado, intentamos de nuevo y avisamos
+            if(baseUsuarios.length === 0) {
+                document.getElementById('login-loading').style.display = 'block';
+                fetchInitialData(); // Reintento
+                alert("Sincronizando seguridad... Por favor intente de nuevo en 3 segundos.");
+                return;
+            }
+
+            usuarioLogueado = null; // Reiniciamos
+
+            // Buscamos coincidencia inteligente del PIN
+            for (let u of baseUsuarios) {
+                if (passInput === u.pin) {
+                    usuarioLogueado = u; // Guardamos quién es
+                    break;
+                }
+            }
+
+            if(usuarioLogueado) {
+                // Login correcto
                 document.getElementById('login-screen').style.display = 'none';
                 document.getElementById('welcome-section').style.display = 'flex';
-                fetchCloudData();
+                
+                // --- BIENVENIDA PERSONALIZADA ---
+                const personalizedTitleElement = document.getElementById('welcome-personalized-title');
+                personalizedTitleElement.innerText = `¡Bienvenido/a, ${usuarioLogueado.name}! (${usuarioLogueado.role})`;
+                 personalizedTitleElement.style.fontSize = "22px"; // Ajuste leve de tamaño
+                
+                // Procedemos con la carga normal del sistema (que ya funcionaba)
+                fetchCloudData(); 
             } else {
-                alert("Contraseña incorrecta. Verifique sus credenciales.");
+                alert("Contraseña/PIN incorrecto. Verifique sus credenciales.");
             }
         }
 
@@ -276,56 +322,55 @@
             if (e.key === 'Enter') checkPassword();
         });
 
-        /**
-         * FUNCIÓN DE SINCRONIZACIÓN MEJORADA
-         * Ahora es más robusta para evitar que se quede "cargando" si no hay datos.
-         */
-       function fetchCloudData() {
-    const subtitle = document.getElementById('main-subtitle');
-    subtitle.innerText = "Sincronizando información de la nube...";
-    subtitle.style.color = "#f39c12";
+        // ----- FUNCIÓN DE SINCRONIZACIÓN ORIGINAL (Con actualización de usuarios) -----
+        function fetchCloudData() {
+            const subtitle = document.getElementById('main-subtitle');
+            subtitle.innerText = "Sincronizando información de la nube...";
+            subtitle.style.color = "#f39c12";
 
-    // Habilitamos botones de inmediato para que el usuario no se quede bloqueado
-    document.getElementById('btn-go-s1').disabled = false;
-    document.getElementById('btn-go-s2').disabled = false;
+            // Habilitamos botones de inmediato
+            document.getElementById('btn-go-s1').disabled = false;
+            document.getElementById('btn-go-s2').disabled = false;
 
-    fetch(GAS_URL)
-        .then(response => response.json())
-        .then(data => {
-            if(data.error) { throw new Error(data.error); }
+            fetch(GAS_URL)
+                .then(response => response.json())
+                .then(data => {
+                    if(data.error) { throw new Error(data.error); }
 
-            // Procesar Libro Azul si existe
-            if(data.dbInventario && Object.keys(data.dbInventario).length > 0) {
-                dbInventario = data.dbInventario;
-                fillYears();
-                document.getElementById('status-azul').innerText = "Sincronizado (Nube)";
-                document.getElementById('status-azul').style.color = "#27ae60";
-            } else {
-                document.getElementById('status-azul').innerText = "Sin datos en nube";
-            }
+                    // Procesar Libro Azul si existe
+                    if(data.dbInventario && Object.keys(data.dbInventario).length > 0) {
+                        dbInventario = data.dbInventario;
+                        fillYears();
+                        document.getElementById('status-azul').innerText = "Sincronizado (Nube)";
+                        document.getElementById('status-azul').style.color = "#27ae60";
+                    } else {
+                        document.getElementById('status-azul').innerText = "Sin datos en nube";
+                        // Si no hay datos, deshabilitamos la sección (seguridad original)
+                        document.getElementById('btn-go-s1').disabled = true;
+                    }
 
-            // Procesar Citas si existen
-            if(data.rawCitasExcel && data.rawCitasExcel.length > 0) {
-                rawCitasExcel = data.rawCitasExcel;
-                nameCitas = data.nameCitas || "Base Nube";
-                currentPass = data.pdfPass || "HYUNDAICOATZA2026";
-                document.getElementById('status-citas').innerText = "Sincronizado (Nube)";
-                document.getElementById('status-citas').style.color = "#27ae60";
-                renderCitas();
-            } else {
-                document.getElementById('status-citas').innerText = "Sin datos en nube";
-            }
-            
-            subtitle.innerText = "Panel de Seminuevos y Servicio (Listo)";
-            subtitle.style.color = "#27ae60";
-        })
-        .catch(error => {
-            console.error("Error de sincronización:", error);
-            subtitle.innerText = "Modo Local: Cargue archivos manualmente";
-            subtitle.style.color = "#c0392b";
-            // Aun con error, los botones ya están habilitados arriba
-        });
-}
+                    // Procesar Citas si existen
+                    if(data.rawCitasExcel && data.rawCitasExcel.length > 0) {
+                        rawCitasExcel = data.rawCitasExcel;
+                        nameCitas = data.nameCitas || "Base Nube";
+                        currentPass = data.pdfPass || ""; // Traemos password del PDF guardado
+                        document.getElementById('status-citas').innerText = "Sincronizado (Nube)";
+                        document.getElementById('status-citas').style.color = "#27ae60";
+                        renderCitas();
+                    } else {
+                        document.getElementById('status-citas').innerText = "Sin datos en nube";
+                        document.getElementById('btn-go-s2').disabled = true;
+                    }
+                    
+                    subtitle.innerText = "Panel de Seminuevos y Servicio (Listo)";
+                    subtitle.style.color = "#27ae60";
+                })
+                .catch(error => {
+                    console.error("Error de sincronización:", error);
+                    subtitle.innerText = "Modo Local (Error Nube)";
+                    subtitle.style.color = "#c0392b";
+                });
+        }
 
         function saveToCloud(payload) {
             const subtitle = document.getElementById('main-subtitle');
@@ -338,7 +383,7 @@
                 headers: { 'Content-Type': 'text/plain' },
                 body: JSON.stringify(payload)
             }).then(() => {
-                subtitle.innerText = "¡Sincronización enviada!";
+                subtitle.innerText = "¡Sincronización enviada con éxito!";
                 subtitle.style.color = "#27ae60";
                 setTimeout(() => { 
                     subtitle.innerText = "Panel de Seminuevos y Servicio"; 
@@ -346,12 +391,12 @@
                 }, 3000);
             }).catch(e => {
                 console.error(e);
-                subtitle.innerText = "Error crítico de conexión";
+                subtitle.innerText = "Error crítico de conexión al guardar";
                 subtitle.style.color = "#c0392b";
             });
         }
 
-        // ----- UTILIDADES -----
+        // ----- UTILIDADES ORIGINALES (SIN CAMBIOS) -----
         function normalizeString(s) {
             if (!s) return "";
             let str = String(s).toUpperCase();
@@ -387,7 +432,7 @@
             document.getElementById('welcome-section').style.display = 'flex';
         }
 
-        // ----- PROCESAMIENTO EXCEL AZUL -----
+        // ----- PROCESAMIENTO EXCEL AZUL (SIN CAMBIOS) -----
         document.getElementById('file-azul').onchange = function(e) {
             const file = e.target.files[0]; if(!file) return;
             const reader = new FileReader();
@@ -474,7 +519,7 @@
             document.getElementById('empty-msg').style.display = 'block';
         }
 
-        // ----- PROCESAMIENTO EXCEL CITAS -----
+        // ----- PROCESAMIENTO EXCEL CITAS (ORIGINAL CON GESTIÓN DE PASS PDF) -----
         document.getElementById('file-citas').onchange = function(e) {
             const file = e.target.files[0]; if(!file) return;
             nameCitas = file.name;
@@ -483,9 +528,10 @@
                 const wb = XLSX.read(new Uint8Array(evt.target.result), {type: 'array'});
                 rawCitasExcel = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], {header: 1});
                 
+                // Muestra modal original para definir password PDF
                 document.getElementById('modal-box-content').innerHTML = `
                     <h3>Seguridad del Archivo PDF</h3>
-                    <p style="font-size:11px; color:#666;">Defina una clave que se pedirá al descargar el reporte de estas citas.</p>
+                    <p style="font-size:11px; color:#666;">Defina una clave obligatoria para descargar el PDF de este reporte.</p>
                     <input type="password" id="p1" placeholder="Nueva Contraseña PDF">
                     <input type="password" id="p2" placeholder="Confirmar Contraseña">
                     <button class="btn-confirm" onclick="setPass()">Guardar e Iniciar</button>
@@ -498,13 +544,14 @@
         function setPass() {
             const p1 = document.getElementById('p1').value;
             if(p1 && p1 === document.getElementById('p2').value) {
-                currentPass = p1;
+                currentPass = p1; // Guardamos el password del PDF actual
                 document.getElementById('modal-pass').style.display = 'none';
                 document.getElementById('status-citas').innerText = "Cargado: " + nameCitas;
                 document.getElementById('status-citas').style.color = "#27ae60";
                 document.getElementById('btn-go-s2').disabled = false;
                 renderCitas();
                 
+                // Sincronizamos con nube (incluyendo el password)
                 saveToCloud({ tipo: 'citas', rawCitasExcel: rawCitasExcel, nameCitas: nameCitas, pdfPass: currentPass });
             } else { alert("Las contraseñas no coinciden o están vacías."); }
         }
@@ -598,20 +645,29 @@
                     `;
                 }
             }
-            document.getElementById('s2-title-db').innerText = "BASE: " + nameCitas;
+            document.getElementById('s2-title-db').innerText = "BASE CITAS: " + nameCitas;
         }
 
+        // ----- DESCARGA PDF (ORIGINAL CON VALIDACIÓN DE PASS PDF) -----
         function promptPdfPassword() {
+            if(!currentPass || currentPass === "") {
+               // Si por alguna razón la nube no cargó la pass (p.ej. modo local), avisamos.
+               alert("Este archivo de citas no tiene una contraseña PDF definida en la nube. Vuelva a subirlo en la pestaña de Inicio para descargar.");
+               return;
+            }
+            
             document.getElementById('modal-box-content').innerHTML = `
                 <h3>Descarga Autorizada</h3>
-                <input type="password" id="check-p" placeholder="Contraseña de este archivo">
+                <input type="password" id="check-p" placeholder="Contraseña obligatoria del archivo PDF">
                 <button class="btn-confirm" onclick="doPdf()">Generar PDF</button>
             `;
             document.getElementById('modal-pass').style.display = 'flex';
         }
 
         function doPdf() {
-            if(document.getElementById('check-p').value === currentPass) {
+            const passCheckInput = document.getElementById('check-p').value;
+            // Compara contra currentPass, que viene de la nube o fue definida al subir
+            if(passCheckInput === currentPass) {
                 const { jsPDF } = window.jspdf;
                 const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'letter' });
                 doc.setFontSize(16); doc.setTextColor(0, 44, 95);
