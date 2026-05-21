@@ -251,8 +251,8 @@
     </div>
 
     <script>
-        // LIGA ACTUALIZADA
-        const GAS_URL = "https://script.google.com/macros/s/AKfycbw-hbCdmzzD4WPU0wA1WeAt2RW09KOptEcZyoClAdg0dkwg3Tqc-Mis76p_mgcNI7AVyA/exec";
+        // LIGA ACTUALIZADA CONECTADA A GOOGLE SHEETS
+        const GAS_URL = "https://script.google.com/macros/s/AKfycbyw88BE-Zs0UPTOiQGaEF8XONxfE0MEvpuP68OD30JHlD1scHsA1Mf2o-ZONkRJMyE4Jw/exec";
         
         let dbInventario = {};
         let rawCitasExcel = [];
@@ -265,29 +265,58 @@
         window.addEventListener('load', fetchInitialData);
 
         function fetchInitialData() {
-            fetch(GAS_URL)
-                .then(response => response.json())
-                .then(data => {
-                    if(data.baseUsuariosInyectada) {
-                        baseUsuarios = data.baseUsuariosInyectada;
+            // CORRECCIÓN: Realizar petición POST para activar doGet (JSON) e invocar get_cloud_data en el App Script
+            fetch(GAS_URL, {
+                method: 'POST',
+                headers: { 'Content-Type': 'text/plain' },
+                body: JSON.stringify({ action: "get_cloud_data" })
+            })
+            .then(response => response.json())
+            .then(res => {
+                if (res.status === "success" && res.data && res.data.usuarios) {
+                    // Converter la tabla (array de arreglos 2D) desde Google Sheets en formato lista de Objetos JS (nombre, nivel, contraseña)
+                    const matriz = res.data.usuarios;
+                    if(matriz.length > 1) { // Verifica si hay datos debajo de los encabezados
+                        const headers = matriz[0];
+                        let objectsTemp = [];
+                        for(let i = 1; i < matriz.length; i++) {
+                            let obj = {};
+                            for(let j = 0; j < headers.length; j++) {
+                                obj[headers[j]] = matriz[i][j];
+                            }
+                            objectsTemp.push(obj);
+                        }
+                        baseUsuarios = objectsTemp; // Sobrescribe la base vacía y habilita el guardado correcto
                     }
-                }).catch(e => console.error("Error usuarios:", e));
+                } else if (res.baseUsuariosInyectada || res.usuarios) {
+                    baseUsuarios = res.baseUsuariosInyectada || res.usuarios;
+                }
+            }).catch(e => console.error("Error cargando usuarios preliminares:", e));
         }
 
+        // CORRECCIÓN PRINCIPAL DEL ACCESO Y LECTURA DE ROL DE USUARIO
         function checkPassword() {
             const passInput = document.getElementById('app-password').value;
-            if(!passInput) { alert("Por favor ingrese su PIN."); return; }
+            if(!passInput) { alert("Por favor ingrese su PIN de acceso."); return; }
 
             if(baseUsuarios.length === 0) {
                 document.getElementById('login-loading').style.display = 'block';
                 fetchInitialData();
-                alert("Sincronizando seguridad... Intente de nuevo en unos segundos.");
+                alert("Validación temporal, sincronizando con la Matriz (Nube)... intente nuevamente en 2 segundos.");
                 return;
             }
 
-            usuarioLogueado = baseUsuarios.find(u => u.pin === passInput);
+            // Aquí nos aseguramos de atrapar el Nivel y la Contraseña vengan con el encabezado que vengan del Sheets
+            usuarioLogueado = baseUsuarios.find(u => {
+                const uPass = u.Contraseña || u.contraseña || u.pin || u.password || (Array.isArray(u) ? u[0] : "");
+                return String(uPass).trim().toUpperCase() === String(passInput).trim().toUpperCase();
+            });
 
             if(usuarioLogueado) {
+                // Recuperar dinamicamente Nombre y Nivel cubriendo todas las variables de Google Sheets
+                usuarioLogueado.name = usuarioLogueado.Nombre_Asesor || usuarioLogueado.nombre_asesor || usuarioLogueado.name || usuarioLogueado.nombre || "Usuario";
+                usuarioLogueado.role = usuarioLogueado.Nivel || usuarioLogueado.nivel || usuarioLogueado.role || usuarioLogueado.rol || "asesor";
+
                 document.getElementById('login-screen').style.display = 'none';
                 document.getElementById('welcome-section').style.display = 'flex';
                 
@@ -295,14 +324,15 @@
                 pTitle.innerText = `¡Bienvenido/a, ${usuarioLogueado.name}! (${usuarioLogueado.role})`;
                 
                 // --- LÓGICA DE VISIBILIDAD DE BOTONES ---
-                if(usuarioLogueado.role === "Gerencia") {
+                // Convertido a minúsculas y sin espacios para evitar fallos de lectura (Gerencia / gerencia / GERENCIA)
+                if(String(usuarioLogueado.role).trim().toLowerCase() === "gerencia") {
                     document.getElementById('admin-controls').style.display = 'grid';
                     document.getElementById('admin-note').style.display = 'block';
                 }
 
                 fetchCloudData(); 
             } else {
-                alert("PIN incorrecto.");
+                alert("PIN incorrecto o no autorizado.");
             }
         }
 
@@ -313,9 +343,17 @@
             subtitle.innerText = "Sincronizando información de la nube...";
             subtitle.style.color = "#f39c12";
 
-            fetch(GAS_URL)
-                .then(response => response.json())
-                .then(data => {
+            // CORRECCIÓN: Petición correcta tipo JSON (POST) en el App Script 
+            fetch(GAS_URL, {
+                method: 'POST',
+                headers: { 'Content-Type': 'text/plain' },
+                body: JSON.stringify({ action: "get_cloud_data" })
+            })
+            .then(response => response.json())
+            .then(res => {
+                if(res.status === "success" && res.data) {
+                    const data = res.data;
+                    
                     if(data.dbInventario && Object.keys(data.dbInventario).length > 0) {
                         dbInventario = data.dbInventario;
                         fillYears();
@@ -334,28 +372,45 @@
                     }
                     subtitle.innerText = "Panel de Seminuevos y Servicio (Listo)";
                     subtitle.style.color = "#27ae60";
-                })
-                .catch(e => {
-                    subtitle.innerText = "Modo Local (Error Nube)";
-                    subtitle.style.color = "#c0392b";
-                });
-        }
-
-        function saveToCloud(payload) {
-            const subtitle = document.getElementById('main-subtitle');
-            subtitle.innerText = "Guardando en la nube...";
-            fetch(GAS_URL, {
-                method: 'POST',
-                mode: 'no-cors',
-                headers: { 'Content-Type': 'text/plain' },
-                body: JSON.stringify(payload)
-            }).then(() => {
-                subtitle.innerText = "¡Sincronización exitosa!";
-                subtitle.style.color = "#27ae60";
+                } else {
+                    throw new Error("Datos incorrectos retornados de Nube");
+                }
+            })
+            .catch(e => {
+                subtitle.innerText = "Modo Local (Revisar conexión)";
+                subtitle.style.color = "#c0392b";
             });
         }
 
-        // --- FUNCIONES DE APOYO (Sin cambios) ---
+        // CORRECCIÓN FUNCION DE GUARDADO A LA NUBE (PERSISTENCIA MULTI-DISPOSITIVO)
+        function saveToCloud(payload) {
+            const subtitle = document.getElementById('main-subtitle');
+            subtitle.innerText = "Guardando actualización en la nube...";
+            
+            // CORRECCIÓN ESENCIAL: Etiquetar como instruccion "save_cloud_data" para el switch() de GAS
+            payload.action = "save_cloud_data";
+
+            fetch(GAS_URL, {
+                method: 'POST',
+                // ELIMINADO el mode: 'no-cors' para poder leer el resultado Json de status éxito de Google
+                headers: { 'Content-Type': 'text/plain' },
+                body: JSON.stringify(payload)
+            }).then(response => response.json())
+            .then(res => {
+                if(res.status === "success") {
+                    subtitle.innerText = "¡Base de datos y Excel grabados en la Nube!";
+                    subtitle.style.color = "#27ae60";
+                } else {
+                    subtitle.innerText = "Error grabacion: " + res.message;
+                    subtitle.style.color = "#c0392b";
+                }
+            }).catch(e => {
+                subtitle.innerText = "Fallo la sincronización en la Nube.";
+                subtitle.style.color = "#c0392b";
+            });
+        }
+
+        // --- FUNCIONES DE APOYO DEL SISTEMA ---
         function normalizeString(s) {
             if (!s) return "";
             let str = String(s).toUpperCase();
@@ -386,7 +441,7 @@
                 const workbook = XLSX.read(new Uint8Array(evt.target.result), {type: 'array'});
                 const rows = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]], {header: 1});
                 procesarDatosAzul(rows);
-                document.getElementById('status-azul').innerText = "Cargado: " + file.name;
+                document.getElementById('status-azul').innerText = "Cargado y enviando: " + file.name;
                 document.getElementById('btn-go-s1').disabled = false;
                 saveToCloud({ tipo: 'azul', dbInventario: dbInventario });
             };
@@ -484,8 +539,9 @@
                 document.getElementById('modal-pass').style.display = 'none';
                 document.getElementById('btn-go-s2').disabled = false;
                 renderCitas();
+                document.getElementById('status-citas').innerText = "Cargado y enviando...";
                 saveToCloud({ tipo: 'citas', rawCitasExcel: rawCitasExcel, nameCitas: nameCitas, pdfPass: currentPass });
-            } else { alert("Error en contraseña."); }
+            } else { alert("Las contraseñas de creación de PDF no coinciden."); }
         }
 
         function saveObs(vin, text) { observacionesData[vin] = text; }
@@ -536,11 +592,12 @@
         }
 
         function promptPdfPassword() {
-            if(!currentPass) { alert("Sin contraseña PDF en nube."); return; }
+            if(!currentPass) { alert("Aún no hay asignada una contraseña PDF desde la nube para el día de hoy."); return; }
             document.getElementById('modal-box-content').innerHTML = `
                 <h3>Descarga Autorizada</h3>
-                <input type="password" id="check-p" placeholder="Contraseña PDF">
-                <button class="btn-confirm" onclick="doPdf()">Generar PDF</button>
+                <p style="font-size: 11px; color:#666;">Ingrese la clave designada hoy por gerencia para exportar.</p>
+                <input type="password" id="check-p" placeholder="Contraseña de gerente PDF">
+                <button class="btn-confirm" onclick="doPdf()">Generar Expediente PDF</button>
             `;
             document.getElementById('modal-pass').style.display = 'flex';
         }
@@ -558,7 +615,7 @@
                 doc.autoTable({ head: [["HORA", "CLIENTE", "UNIDAD", "AÑO", "VIN", "PLACA", "SERVICIO", "ASESOR", "TOMA", "OBS"]], body: rows, startY: 25, theme: 'grid', styles: {fontSize: 7}});
                 doc.save("Citas_Hyundai.pdf");
                 document.getElementById('modal-pass').style.display = 'none';
-            } else { alert("Contraseña incorrecta."); }
+            } else { alert("Contraseña incorrecta. Pida autorización a Gerencia."); }
         }
     </script>
 </body>
